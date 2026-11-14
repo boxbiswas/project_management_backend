@@ -1,12 +1,6 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-
-// Resolve directory to ensure backend/.env loads reliably regardless of launch directory
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.join(__dirname, '.env') });
-
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
@@ -14,68 +8,75 @@ import mongoose from 'mongoose';
 import connectDB from './config/config.js';
 import authRoutes from './routes/authRoutes.js';
 
+// Resolve current directory path to load .env from backend root
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.join(__dirname, '.env') });
+
 const app = express();
 
-// Connect to MongoDB
+// Establish connection to MongoDB Atlas database
 connectDB();
 
-// CORS configuration (supports credentials for httpOnly cookies)
-app.use(cors({
-    origin: [
-        "http://localhost:5173",
-        process.env.CLIENT_URL
-    ],
+// CORS configuration for local development and production
+const allowedOrigins = [
+  'http://localhost:5173',
+  process.env.CLIENT_URL,
+].filter(Boolean);
+
+app.use(
+  cors({
+    origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  })
+);
 
-// Body Parsing & Cookie Parsing
+// Global middleware
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(cookieParser());
 
-// Health Check Endpoint (GET /health)
+// Health check endpoint
 app.get('/health', (req, res) => {
-    const dbState = mongoose.connection.readyState;
-    const dbStatusMap = {
-        0: 'disconnected',
-        1: 'connected',
-        2: 'connecting',
-        3: 'disconnecting'
-    };
+  const dbState = mongoose.connection.readyState;
+  const dbStatusMap = {
+    0: 'disconnected',
+    1: 'connected',
+    2: 'connecting',
+    3: 'disconnecting',
+  };
 
-    res.status(200).json({
-        status: 'ok',
-        timestamp: new Date().toISOString(),
-        uptime: `${Math.floor(process.uptime())}s`,
-        database: dbStatusMap[dbState] || 'unknown'
-    });
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: `${Math.floor(process.uptime())}s`,
+    database: dbStatusMap[dbState] || 'unknown',
+  });
 });
 
-// Authentication Routes (POST /auth/register, POST /auth/login, POST /auth/logout)
+// Authentication routes
 app.use('/auth', authRoutes);
 
-
+// Server initialization and graceful shutdown
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
 
-// Graceful Shutdown on SIGINT and SIGTERM
 const gracefulShutdown = async (signal) => {
-    console.log(`\nReceived ${signal}. Shutting down gracefully...`);
-    server.close(async () => {
-        console.log('HTTP server closed.');
-        try {
-            await mongoose.connection.close();
-            console.log('MongoDB connection closed.');
-            process.exit(0);
-        } catch (err) {
-            console.error('Error closing MongoDB connection:', err);
-            process.exit(1);
-        }
-    });
+  console.log(`\nReceived ${signal}. Shutting down gracefully...`);
+  server.close(async () => {
+    try {
+      await mongoose.connection.close();
+      console.log('MongoDB connection closed.');
+      process.exit(0);
+    } catch (err) {
+      console.error('Error closing MongoDB connection:', err);
+      process.exit(1);
+    }
+  });
 };
 
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
