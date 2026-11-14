@@ -103,6 +103,38 @@ export const createTicket = async (req, res) => {
   }
 };
 
+// GET /tickets - List tickets for the current user across accessible projects
+export const getUserTickets = async (req, res) => {
+  try {
+    const currentUserId = req.user.id || req.user.userId;
+
+    // Find all projects accessible to user
+    const userProjects = await Project.find({
+      $or: [{ createdBy: currentUserId }, { 'teamMembers.userId': currentUserId }],
+    }).select('_id');
+
+    const projectIds = userProjects.map((p) => p._id);
+
+    const filter = { projectId: { $in: projectIds } };
+    if (req.query.assignedToMe === 'true') {
+      filter.assigneeId = currentUserId;
+    }
+    if (req.query.status) {
+      filter.status = req.query.status;
+    }
+
+    const tickets = await Ticket.find(filter)
+      .populate('assigneeId', 'name email')
+      .populate('createdBy', 'name email')
+      .populate('projectId', 'title')
+      .sort({ updatedAt: -1 });
+
+    return res.status(200).json({ tickets });
+  } catch (error) {
+    return res.status(500).json({ message: 'Server error fetching tickets', error: error.message });
+  }
+};
+
 // GET /projects/:projectId/tickets - List all tickets for a specific project
 export const getTicketsByProject = async (req, res) => {
   try {
