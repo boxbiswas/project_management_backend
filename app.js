@@ -7,6 +7,8 @@ import cors from 'cors';
 import mongoose from 'mongoose';
 import connectDB from './config/config.js';
 import authRoutes from './routes/authRoutes.js';
+import projectRoutes from './routes/projectRoutes.js';
+import ticketRoutes from './routes/ticketRoutes.js';
 
 // Resolve current directory path to load .env from backend root
 const __filename = fileURLToPath(import.meta.url);
@@ -56,8 +58,10 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Authentication routes
+// Application routes
 app.use('/auth', authRoutes);
+app.use('/projects', projectRoutes);
+app.use('/tickets', ticketRoutes);
 
 // Server initialization and graceful shutdown
 const PORT = process.env.PORT || 3000;
