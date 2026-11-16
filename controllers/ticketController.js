@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import Ticket from '../models/Ticket.js';
 import Project from '../models/Project.js';
 import User from '../models/User.js';
+import Comment from '../models/Comment.js';
 
 // Helper to check if user is a member or creator of a project
 const isProjectMember = (project, userId) => {
@@ -14,20 +15,38 @@ const isProjectMember = (project, userId) => {
   });
 };
 
-// Helper to check if user can manage tickets (admin, manager, or creator)
-const canModifyTicket = (project, ticket, userId) => {
+// Helper to get user's role in a project (admin, manager, developer, viewer)
+const getUserRoleInProject = (project, userId) => {
+  if (!project || !userId) return null;
   const userIdStr = userId.toString();
-  const projectCreatorId = (project.createdBy?._id || project.createdBy).toString();
-  const ticketCreatorId = (ticket.createdBy?._id || ticket.createdBy).toString();
-
-  if (userIdStr === projectCreatorId || userIdStr === ticketCreatorId) return true;
+  const creatorId = (project.createdBy?._id || project.createdBy).toString();
+  if (creatorId === userIdStr) return 'admin';
 
   const member = project.teamMembers.find((m) => {
     const mId = (m.userId?._id || m.userId).toString();
     return mId === userIdStr;
   });
 
-  return member && (member.role === 'admin' || member.role === 'manager' || member.role === 'developer');
+  return member ? member.role : null;
+};
+
+// Helper to check if user can edit tickets (admin, manager, or developer)
+const canEditTicket = (project, ticket, userId) => {
+  const role = getUserRoleInProject(project, userId);
+  if (!role || role === 'viewer') return false;
+  return role === 'admin' || role === 'manager' || role === 'developer';
+};
+
+// Helper to check if user can delete tickets (admin, manager, or ticket creator)
+const canDeleteTicket = (project, ticket, userId) => {
+  const userIdStr = userId.toString();
+  const role = getUserRoleInProject(project, userId);
+  if (!role || role === 'viewer') return false;
+
+  if (role === 'admin' || role === 'manager') return true;
+
+  const ticketCreatorId = (ticket.createdBy?._id || ticket.createdBy).toString();
+  return role === 'developer' && ticketCreatorId === userIdStr;
 };
 
 // POST /tickets - Create a new ticket
@@ -49,8 +68,10 @@ export const createTicket = async (req, res) => {
     if (!project) {
       return res.status(404).json({ message: 'Project not found' });
     }
-    if (!isProjectMember(project, currentUserId)) {
-      return res.status(403).json({ message: 'Access denied: not a member of this project' });
+
+    const userRole = getUserRoleInProject(project, currentUserId);
+    if (!userRole || userRole === 'viewer') {
+      return res.status(403).json({ message: 'Permission denied: viewers cannot create tickets' });
     }
 
     // Validate priority and status enum values
@@ -135,7 +156,7 @@ export const getUserTickets = async (req, res) => {
   }
 };
 
-// GET /projects/:projectId/tickets - List all tickets for a specific project
+// GET /projects/:projectId/tickets - List all tickets for a specific project with filters & search
 export const getTicketsByProject = async (req, res) => {
   try {
     const { projectId } = req.params;
@@ -154,13 +175,32 @@ export const getTicketsByProject = async (req, res) => {
       return res.status(403).json({ message: 'Access denied: not a member of this project' });
     }
 
-    // Build query filter with optional status, priority, and assignee parameters
+    // Build dynamic query filter with status, priority, assignee, and keyword search
     const filter = { projectId };
-    if (req.query.status) filter.status = req.query.status;
-    if (req.query.priority) filter.priority = req.query.priority;
-    if (req.query.assignee) filter.assigneeId = req.query.assignee;
-    if (req.query.search) {
-      filter.$text = { $search: req.query.search };
+
+    if (req.query.status && req.query.status !== 'all') {
+      filter.status = req.query.status;
+    }
+
+    if (req.query.priority && req.query.priority !== 'all') {
+      filter.priority = req.query.priority;
+    }
+
+    if (req.query.assignee && req.query.assignee !== 'all') {
+      if (req.query.assignee === 'unassigned') {
+        filter.assigneeId = null;
+      } else if (mongoose.Types.ObjectId.isValid(req.query.assignee)) {
+        filter.assigneeId = req.query.assignee;
+      }
+    }
+
+    if (req.query.search && req.query.search.trim()) {
+      const escaped = req.query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchRegex = new RegExp(escaped, 'i');
+      filter.$or = [
+        { title: { $regex: searchRegex } },
+        { description: { $regex: searchRegex } },
+      ];
     }
 
     const tickets = await Ticket.find(filter)
@@ -168,7 +208,7 @@ export const getTicketsByProject = async (req, res) => {
       .populate('createdBy', 'name email')
       .sort({ updatedAt: -1 });
 
-    return res.status(200).json({ tickets });
+    return res.status(200).json({ count: tickets.length, tickets });
   } catch (error) {
     return res.status(500).json({ message: 'Server error fetching tickets', error: error.message });
   }
@@ -223,6 +263,11 @@ export const updateTicket = async (req, res) => {
     const project = await Project.findById(ticket.projectId);
     if (!project || !isProjectMember(project, currentUserId)) {
       return res.status(403).json({ message: 'Access denied: not a member of this project' });
+    }
+
+    // Role-based authorization check
+    if (!canEditTicket(project, ticket, currentUserId)) {
+      return res.status(403).json({ message: 'Permission denied: viewers cannot edit tickets' });
     }
 
     // Apply and validate field modifications
@@ -304,6 +349,11 @@ export const updateTicketAssignee = async (req, res) => {
       return res.status(403).json({ message: 'Access denied: not a member of this project' });
     }
 
+    // Role-based authorization check
+    if (!canEditTicket(project, ticket, currentUserId)) {
+      return res.status(403).json({ message: 'Permission denied: viewers cannot edit tickets' });
+    }
+
     // Handle ticket unassignment
     if (!assigneeId) {
       ticket.assigneeId = null;
@@ -355,14 +405,18 @@ export const deleteTicket = async (req, res) => {
       return res.status(404).json({ message: 'Project not found' });
     }
 
-    // Validate permission to delete ticket
-    if (!canModifyTicket(project, ticket, currentUserId)) {
-      return res.status(403).json({ message: 'Permission denied: cannot delete this ticket' });
+    // Role-based authorization: admin, manager, or ticket creator
+    if (!canDeleteTicket(project, ticket, currentUserId)) {
+      return res.status(403).json({
+        message: 'Permission denied: only project admins, managers, or the ticket creator can delete this ticket',
+      });
     }
 
+    // Cascade delete ticket comments and ticket record
+    await Comment.deleteMany({ ticketId });
     await Ticket.findByIdAndDelete(ticketId);
 
-    return res.status(200).json({ message: 'Ticket deleted successfully' });
+    return res.status(200).json({ message: 'Ticket deleted successfully', ticketId });
   } catch (error) {
     return res.status(500).json({ message: 'Server error deleting ticket', error: error.message });
   }
