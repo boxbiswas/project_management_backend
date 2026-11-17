@@ -55,13 +55,13 @@ The BugBoard Backend coordinates all project workspaces, ticket lifecycles, team
 flowchart TD
     Client["Frontend Client (React 19 / Vite / Redux)"]
     Router["Express 5 Router (/auth, /projects, /tickets)"]
-    AuthMW["Auth Middleware (JWT & Cookie Verification)"]
+    AuthMW["Auth Middleware (JWT & Cookie)"]
     RBAC["RBAC Policy Engine (admin, manager, dev, viewer)"]
     Ctrl["Domain Controllers (Auth, Project, Ticket, Comment)"]
     Models["Mongoose 9 ODM (User, Project, Ticket, Comment)"]
     DB[("MongoDB Atlas Cloud Database")]
 
-    Client -->|"HTTP Requests (withCredentials: true)"| Router
+    Client -->|HTTP Requests| Router
     Router --> AuthMW
     AuthMW --> RBAC
     RBAC --> Ctrl
@@ -166,51 +166,50 @@ The MongoDB database utilizes four strictly defined collections:
 
 ```mermaid
 erDiagram
-    USER ||--o{ PROJECT : "creates"
-    USER ||--o{ TICKET : "creates / assigned"
-    USER ||--o{ COMMENT : "authors"
-    PROJECT ||--o{ TICKET : "contains"
-    TICKET ||--o{ COMMENT : "contains"
+    USER ||--o{ PROJECT : creates
+    USER ||--o{ TICKET : assigned
+    USER ||--o{ COMMENT : writes
+    PROJECT ||--o{ TICKET : contains
+    TICKET ||--o{ COMMENT : contains
 
     USER {
-        ObjectId _id PK
+        string id PK
         string name
         string email UK
         string passwordHash
-        Date createdAt
-        Date updatedAt
+        string createdAt
+        string updatedAt
     }
 
     PROJECT {
-        ObjectId _id PK
+        string id PK
         string title
         string description
-        ObjectId createdBy FK
-        Array teamMembers
-        Date createdAt
-        Date updatedAt
+        string createdBy FK
+        string createdAt
+        string updatedAt
     }
 
     TICKET {
-        ObjectId _id PK
+        string id PK
         string title
         string description
         string priority
         string status
-        ObjectId assigneeId FK
-        ObjectId projectId FK
-        ObjectId createdBy FK
-        Date createdAt
-        Date updatedAt
+        string assigneeId FK
+        string projectId FK
+        string createdBy FK
+        string createdAt
+        string updatedAt
     }
 
     COMMENT {
-        ObjectId _id PK
-        ObjectId ticketId FK
-        ObjectId userId FK
+        string id PK
+        string ticketId FK
+        string userId FK
         string text
-        Date createdAt
-        Date updatedAt
+        string createdAt
+        string updatedAt
     }
 ```
 
