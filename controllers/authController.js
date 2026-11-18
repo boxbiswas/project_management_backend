@@ -96,12 +96,8 @@ export const register = async (req, res) => {
       passwordHash,
     });
 
-    const token = generateToken(newUser);
-    setAuthCookie(res, token);
-
     return res.status(201).json({
-      message: 'User registered successfully',
-      token,
+      message: 'User registered successfully. Please log in.',
       user: {
         id: newUser._id,
         _id: newUser._id,
